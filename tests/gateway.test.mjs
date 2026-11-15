@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { gatewayHandler, completion, optionsFor } from '../src/gateway.mjs';
 import { apiHandler } from '../src/api.mjs';
+import { CONSOLE_PATH } from '../src/api-path.mjs';
 import { fixture, models, listen } from './helpers.mjs';
 
 const message = { model: 'dsh-default', messages: [{ role: 'system', content: 'Be helpful' }, { role: 'user', content: 'test' }] };
@@ -55,8 +56,11 @@ test('管理 API 拒绝跨站及未带写入令牌的操作，响应不泄漏私
   const { manager } = await fixture(t), url = await listen(t, apiHandler(manager));
   const initial = await (await fetch(url)).json();
   assert.equal(initial.token, undefined); assert.ok(initial.key);
-  const post = (key, origin) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hindsight-key': key, ...(origin ? { origin } : {}) }, body: JSON.stringify({ type: 'logout' }) });
+  const post = (key, origin) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hindsight-key': key, ...(origin ? { origin } : {}) }, body: JSON.stringify({ type: 'console.open' }) });
   assert.equal((await post('wrong')).status, 403);
   assert.equal((await post(initial.key, 'https://evil.example')).status, 403);
-  assert.equal((await post(initial.key)).status, 200);
+  const opened = await post(initial.key);
+  assert.equal(opened.status, 200);
+  assert.equal(opened.headers.get('set-cookie'), null);
+  assert.deepEqual(await opened.json(), { url: `${CONSOLE_PATH}/` });
 });

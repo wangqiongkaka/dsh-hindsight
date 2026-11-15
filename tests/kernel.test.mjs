@@ -18,9 +18,11 @@ test('真实 Cordis 生命周期：注册管理页接口，启动转接，卸载
   const routes = [];
   ctx.provide('webServer', { register(route) { routes.push(route); return () => routes.splice(routes.indexOf(route), 1); } });
   ctx.provide('llm', fakeLlm());
+  ctx.provide('connection', { authorizeIndex: () => true });
   const fiber = await ctx.plugin({ name: host.name, inject: host.inject, apply: scope => host.apply(scope, { root, port }) });
   t.after(() => fiber.dispose());
-  assert.equal(routes.length, 1);
+  assert.equal(routes.length, 2);
+  assert.equal(routes[1].kind, 'prefix');
   const res = { status: 0, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); } };
   await routes[0].handler({ method: 'GET', headers: { host: '127.0.0.1:8000' }, socket: { remoteAddress: '127.0.0.1' } }, res);
   assert.equal(res.status, 200); assert.equal(res.body.models.length, 2);

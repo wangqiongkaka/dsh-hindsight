@@ -32,19 +32,13 @@ export async function listen(t, handler) {
 export async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-hindsight-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const upstream = { calls: [], expired: false, bankCount: 2, auth: true, dataAuthError: false };
+  const upstream = { calls: [], auth: true };
   const llm = fakeLlm();
-  const manager = new HindsightManager({ root, llm: () => llm, fetchImpl: async (url, options = {}) => {
+  const manager = new HindsightManager({ root, llm: () => llm, accessKey: async () => 'test-access-key', fetchImpl: async (url, options = {}) => {
     const path = new URL(url).pathname, body = options.body ? JSON.parse(options.body) : undefined;
     upstream.calls.push({ url, ...options, body });
     if (path.endsWith('/api/version')) return Response.json({ features: { access_key_auth: upstream.auth } });
     if (path.endsWith('/api/auth/login')) return body.key === 'test-access-key' ? Response.json({ success: true }, { headers: { 'set-cookie': 'hindsight_cp_access=test-session; Path=/; HttpOnly' } }) : Response.json({ error: 'wrong key' }, { status: 401 });
-    if (upstream.auth && (options.headers?.cookie !== 'hindsight_cp_access=test-session' || upstream.expired)) return Response.json({ error: 'expired' }, { status: 401, headers: { 'x-hindsight-session-required': '1' } });
-    if (upstream.dataAuthError) return Response.json({ error: 'backend authentication error' }, { status: 401 });
-    if (path.endsWith('/api/banks')) {
-      const query = new URL(url).searchParams, offset = Number(query.get('offset') ?? 0), limit = Number(query.get('limit') ?? 100);
-      return Response.json({ banks: Array.from({ length: Math.max(0, Math.min(limit, upstream.bankCount - offset)) }, (_, i) => ({ bank_id: `bank-${offset + i}`, name: `示例记忆库 ${offset + i + 1}` })), total: upstream.bankCount });
-    }
     return Response.json({ error: 'not found' }, { status: 404 });
   } });
   await manager.init(); manager.gateway = 'http://127.0.0.1:18991';

@@ -4,45 +4,39 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fixture, models } from './helpers.mjs';
 import { consoleUrl } from '../src/service.mjs';
+import { CONSOLE_PATH } from '../src/api-path.mjs';
 
-test('登录校验密钥，后台保留会话，前端与磁盘均不回显控制台密钥', async t => {
+test('免密登录复用原生会话，模型状态与磁盘不回显控制台凭据', async t => {
   const { manager, root } = await fixture(t);
-  await assert.rejects(manager.login('http://localhost:9999', 'wrong'), { status: 401 });
-  assert.equal(manager.session, null);
-  await manager.login('http://localhost:9999', 'test-access-key');
-  assert.equal((await manager.state()).loggedIn, true);
-  assert.equal((await manager.banks()).banks.length, 2);
+  const result = await manager.openConsole();
+  assert.deepEqual(result, { url: `${CONSOLE_PATH}/` });
+  assert.equal(manager.consoleSession.cookie, 'hindsight_cp_access=test-session');
   const disk = await readFile(join(root, 'settings.json'), 'utf8');
   const state = JSON.stringify(await manager.state());
   for (const secret of ['test-access-key', 'test-session']) { assert.ok(!disk.includes(secret)); assert.ok(!state.includes(secret)); }
   assert.ok(!state.includes(manager.settings.token));
-  await manager.action({ type: 'logout' });
-  await assert.rejects(manager.banks(), { status: 401 });
+  assert.equal((await manager.state()).loggedIn, undefined);
 });
 
-test('未启用认证时可以空密钥连接，控制台支持带 basePath 的地址', async t => {
+test('未启用认证时不读取凭据，后台保留部署路径，手机只获得同源入口', async t => {
   const { manager, upstream } = await fixture(t); upstream.auth = false;
-  await manager.login('https://example.test/hindsight/', '');
-  assert.equal((await manager.banks()).banks.length, 2);
-  assert.ok(upstream.calls.some(call => call.url.startsWith('https://example.test/hindsight/api/banks')));
+  manager.consoleAddress = 'http://localhost:9999/hindsight';
+  manager.accessKey = async () => { throw new Error('不应读取凭据'); };
+  assert.deepEqual(await manager.openConsole(), { url: `${CONSOLE_PATH}/` });
+  assert.deepEqual(manager.consoleSession, { url: 'http://localhost:9999/hindsight', cookie: '' });
+  assert.equal(upstream.calls.length, 1);
   for (const url of ['http://example.test', 'https://u:p@example.test', 'file:///tmp/test', 'https://example.test/?token=x']) assert.throws(() => consoleUrl(url), { status: 400 });
 });
 
-test('只在控制台会话过期时退出，不把后端 API 认证失败当成会话过期', async t => {
+test('无效凭据和非本地上游明确失败，手机的 HTTPS 与本地 HTTP 可以经同源代理连接', async t => {
   const { manager, upstream } = await fixture(t);
-  await manager.login('http://localhost:9999', 'test-access-key');
-  upstream.dataAuthError = true;
-  await assert.rejects(manager.banks(), { status: 401 }); assert.ok(manager.session);
-  upstream.dataAuthError = false; upstream.expired = true;
-  await assert.rejects(manager.banks(), { status: 401 }); assert.equal(manager.session, null);
-});
-
-test('记忆库列表完整分页，不返回上游额外字段', async t => {
-  const { manager, upstream } = await fixture(t);
-  await manager.login('http://localhost:9999', 'test-access-key');
-  upstream.bankCount = 205;
-  assert.equal((await manager.banks()).banks.length, 205);
-  assert.deepEqual(Object.keys((await manager.banks()).banks[0]), ['id', 'name']);
+  manager.accessKey = async () => 'wrong';
+  await assert.rejects(manager.openConsole(), { status: 401 });
+  assert.equal(upstream.auth, true);
+  manager.consoleAddress = 'https://remote.example';
+  await assert.rejects(manager.openConsole(), { status: 400 });
+  manager.consoleAddress = 'http://localhost:9999'; manager.accessKey = async () => 'test-access-key';
+  assert.deepEqual(await manager.action({ type: 'console.open' }), { url: `${CONSOLE_PATH}/` });
 });
 
 test('全局配置生成私有文件，保留令牌，模型删除时拒绝保存', async t => {
@@ -60,9 +54,9 @@ test('全局配置生成私有文件，保留令牌，模型删除时拒绝保�
   assert.equal(manager.settings.defaultModel, models[1]);
 });
 
-test('记忆库保持只读，拒绝已取消的 Bank 写入操作', async t => {
+test('自建登录、退出与记忆库列表接口已经移除', async t => {
   const { manager, upstream } = await fixture(t);
-  await assert.rejects(manager.action({ type: 'bank.save', bankId: 'bank-0', model: models[1] }), { status: 400 });
+  for (const type of ['login', 'logout', 'banks', 'bank.save']) await assert.rejects(manager.action({ type }), { status: 400 });
   assert.equal(upstream.calls.length, 0);
 });
 
