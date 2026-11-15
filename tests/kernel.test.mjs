@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Context } from '@deepseek-ai/cordis';
+import * as host from '../src/index.mjs';
+import { fakeLlm } from './helpers.mjs';
+
+test('真实 Cordis 生命周期：注册管理页接口，启动转接，卸载清理监听端口', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'hindsight-kernel-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
+  const port = probe.address().port; await new Promise(resolve => probe.close(resolve));
+  const ctx = new Context(); ctx.logger.level = 'silent';
+  const routes = [];
+  ctx.provide('webServer', { register(route) { routes.push(route); return () => routes.splice(routes.indexOf(route), 1); } });
+  ctx.provide('llm', fakeLlm());
+  const fiber = await ctx.plugin({ name: host.name, inject: host.inject, apply: scope => host.apply(scope, { root, port }) });
+  t.after(() => fiber.dispose());
+  assert.equal(routes.length, 1);
+  const res = { status: 0, writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); } };
+  await routes[0].handler({ method: 'GET', headers: { host: '127.0.0.1:8000' }, socket: { remoteAddress: '127.0.0.1' } }, res);
+  assert.equal(res.status, 200); assert.equal(res.body.models.length, 2);
+  assert.equal(res.body.gateway, `http://127.0.0.1:${port}`);
+  assert.equal((await fetch(`${res.body.gateway}/v1/models`)).status, 401);
+  await fiber.dispose();
+  assert.equal(routes.length, 0);
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/v1/models`));
+});

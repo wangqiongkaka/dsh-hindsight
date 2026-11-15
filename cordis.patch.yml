@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-hindsight-0.1.0
+      name: ./lib/index.js
