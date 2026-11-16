@@ -48,6 +48,16 @@ test('页面、脚本和样式路径留在代理内，外部链接、API 数据�
   assert.equal(parseBank('/banks/original'), 'original');
 });
 
+test('手机宽度下内嵌控制台得到记忆库下拉的窄屏覆盖样式', () => {
+  const html = rewriteConsole('<html><head><meta charset="utf-8"></head><body></body></html>', 'text/html', new URL('http://localhost:9999'));
+  assert.match(html, /data-dsh-hindsight-phone/);
+  assert.match(html, /@media \(max-width: 720px\)/);
+  assert.match(html, /\[cmdk-item\]\{min-height:44px\}/);
+  assert.match(html, /-webkit-line-clamp:2/);
+  assert.match(html, /\[cmdk-input\]\{font-size:16px !important\}/);
+  assert.equal(rewriteConsole('<p>没有 head 的片段</p>', 'text/html', new URL('http://localhost:9999')), '<p>没有 head 的片段</p>');
+});
+
 test('原生会话过期时读取只续期一次，写入不会自动重试', async t => {
   let logins = 0, requests = 0;
   const manager = {

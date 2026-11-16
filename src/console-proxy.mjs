@@ -4,6 +4,24 @@ import { CONSOLE_PATH } from './api-path.mjs';
 import { HttpError, localRequest, failure } from './http.mjs';
 import { consoleBridge } from './console-bridge.mjs';
 
+/**
+ * The native console is a desktop-first app shown at phone width inside its iframe. These rules
+ * only touch what breaks at that width: the bank palette's rows, long bank ids and the search
+ * field (16px keeps iOS from zooming the whole console when the keyboard opens). Nothing here
+ * adds or removes console features.
+ */
+export const consolePhoneStyle = '<style data-dsh-hindsight-phone>@media (max-width: 720px){'
+  + '[role="combobox"]{min-height:44px}'
+  + '[cmdk-input]{font-size:16px !important}'
+  + '[cmdk-item]{min-height:44px}'
+  // A bank id like `coding-agent::crm-2026-11-12-7e…` is the only thing distinguishing rows on a
+  // phone, where the title attribute has no hover to reveal it: let it take two lines.
+  + '[cmdk-item]>div.relative>span.truncate.flex-1{display:-webkit-box;white-space:normal;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2}'
+  // The count stays; the relative time beside it is the first thing to give up the little width.
+  + '[cmdk-item] span.tabular-nums>span.ml-1\\.5{display:none}'
+  + '[data-radix-popper-content-wrapper] [cmdk-list]{max-height:min(300px,calc(100dvh - 240px))}'
+  + '}</style>';
+
 const MAX_TEXT = 16 * 1024 * 1024;
 const requestHeaders = ['accept', 'accept-language', 'content-type', 'range', 'rsc', 'next-url', 'next-router-state-tree', 'next-router-prefetch', 'next-router-segment-prefetch', 'next-action', 'next-hmr-refresh'];
 const hopHeaders = new Set(['connection', 'transfer-encoding', 'keep-alive', 'set-cookie', 'content-encoding', 'content-length']);
@@ -22,7 +40,7 @@ export function rewriteConsole(text, type, target) {
   if (type.includes('text/html')) return text.replace(/\b(href|src|action|poster)=(['"])([^'"]*)\2/gi,
     (_, attribute, quote, value) => `${attribute}=${quote}${publicPath(value, target)}${quote}`)
     .replace(/(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi, (_, start, body, end) => start + body.replaceAll(target.pathname.replace(/\/$/, '') + '/_next/', CONSOLE_PATH + '/_next/') + end)
-    .replace(/<head(?:\s[^>]*)?>/i, match => `${match}<script src="${CONSOLE_PATH}/_bridge.js"></script>`);
+    .replace(/<head(?:\s[^>]*)?>/i, match => `${match}<script src="${CONSOLE_PATH}/_bridge.js"></script>${consolePhoneStyle}`);
   if (type.includes('text/css')) return text.replace(/url\(\s*(['"]?)(\/[^)'"\s]*)\1\s*\)/g,
     (_, quote, value) => `url(${quote}${publicPath(value, target)}${quote})`);
   if (!/(?:application|text)\/(?:javascript|x-javascript)/i.test(type)) return text;
